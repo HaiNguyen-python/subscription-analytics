@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,metricflow]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Type check
+        run: mypy src
+      - name: dbt parse and semantic layer validation
+        run: dbt parse --project-dir dbt --profiles-dir dbt
+      - name: Dagster definitions load
+        run: dagster definitions validate
+      - name: Tests (tiny dataset through every Dagster asset, dbt build on DuckDB)
+        run: pytest --cov-fail-under=80
+      - name: Full pipeline on the default synthetic data (2,000 customers)
+        run: subs run-all
+      - name: Same assets through the Dagster CLI
+        run: dagster asset materialize --select '*' --partition 2026-09-01 -m subs_analytics.definitions
