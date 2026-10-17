@@ -1,0 +1,26 @@
+name: subs_analytics
+version: "0.1.0"
+config-version: 2
+profile: subs_analytics
+
+model-paths: ["models"]
+test-paths: ["tests"]
+clean-targets: ["target"]
+
+flags:
+  send_anonymous_usage_stats: false
+
+models:
+  subs_analytics:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: table
+    marts:
+      +materialized: table
+
+vars:
+  # The billing reconciliation must close to the cent (EUR); float rounding stays far below.
+  billing_tolerance_eur: 0.01
+  # Recognised recurring revenue, calendar-normalised, must be within this share of average MRR.
+  revenue_tolerance_pct: 0.05

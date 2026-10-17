@@ -1,0 +1,10 @@
+# DuckDB everywhere (local, tests, CI). The path comes from SUBS_DUCKDB_PATH, which the
+# `subs` CLI and the Dagster assets set to an absolute path before calling dbt.
+subs_analytics:
+  target: duckdb
+  outputs:
+    duckdb:
+      type: duckdb
+      path: "{{ env_var('SUBS_DUCKDB_PATH', '../data/warehouse.duckdb') }}"
+      schema: analytics
+      threads: 4
