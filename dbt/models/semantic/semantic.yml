@@ -1,0 +1,195 @@
+# The one definition of every subscription metric. dbt validates this file on every parse
+# (it is a dbt semantic model), and `subs_analytics.semantic` compiles it to SQL for the
+# Dagster metrics asset and the report. No report computes a metric any other way.
+version: 2
+
+models:
+  - name: metricflow_time_spine
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        granularity: day
+
+semantic_models:
+  - name: customer_months
+    description: One row per customer and month, from fct_mrr_movements. Amounts in EUR.
+    model: ref('fct_mrr_movements')
+    defaults:
+      agg_time_dimension: month_start
+    entities:
+      - name: customer_month
+        type: primary
+        expr: customer_month_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: month_start
+        type: time
+        type_params:
+          time_granularity: month
+      - name: currency
+        type: categorical
+      - name: plan_tier
+        type: categorical
+      - name: plan_interval
+        type: categorical
+    measures:
+      - name: mrr_eur
+        description: MRR at the month end.
+        agg: sum
+        expr: ending_mrr_eur
+      - name: starting_mrr_eur
+        agg: sum
+      - name: new_mrr_eur
+        agg: sum
+      - name: expansion_mrr_eur
+        agg: sum
+      - name: contraction_mrr_eur
+        agg: sum
+      - name: churned_mrr_eur
+        agg: sum
+      - name: reactivation_mrr_eur
+        agg: sum
+      - name: fx_mrr_eur
+        agg: sum
+      - name: lost_mrr_eur
+        description: Churned plus contraction MRR, as a positive number.
+        agg: sum
+        expr: -(churned_mrr_eur + contraction_mrr_eur)
+      - name: active_customers
+        description: Customers with MRR above zero at the month end (a 100% coupon is not one).
+        agg: sum
+        expr: case when mrr_local > 0 then 1 else 0 end
+      - name: starting_customers
+        agg: sum
+        expr: case when prev_mrr_local > 0 then 1 else 0 end
+      - name: churned_customers
+        agg: sum
+        expr: case when movement_type = 'churn' then 1 else 0 end
+      - name: nrr_base_eur
+        agg: sum
+      - name: nrr_retained_eur
+        agg: sum
+
+metrics:
+  - name: mrr
+    label: MRR (EUR)
+    description: Monthly recurring revenue at the month end.
+    type: simple
+    type_params:
+      measure: mrr_eur
+  - name: starting_mrr
+    label: Starting MRR (EUR)
+    type: simple
+    type_params:
+      measure: starting_mrr_eur
+  - name: new_mrr
+    label: New MRR
+    type: simple
+    type_params:
+      measure: new_mrr_eur
+  - name: expansion_mrr
+    label: Expansion MRR
+    type: simple
+    type_params:
+      measure: expansion_mrr_eur
+  - name: contraction_mrr
+    label: Contraction MRR
+    type: simple
+    type_params:
+      measure: contraction_mrr_eur
+  - name: churned_mrr
+    label: Churned MRR
+    type: simple
+    type_params:
+      measure: churned_mrr_eur
+  - name: reactivation_mrr
+    label: Reactivation MRR
+    type: simple
+    type_params:
+      measure: reactivation_mrr_eur
+  - name: fx_mrr
+    label: FX translation
+    type: simple
+    type_params:
+      measure: fx_mrr_eur
+  - name: lost_mrr
+    label: Lost MRR (churn + contraction)
+    type: simple
+    type_params:
+      measure: lost_mrr_eur
+  - name: active_customers
+    label: Paying customers
+    type: simple
+    type_params:
+      measure: active_customers
+  - name: starting_customers
+    label: Paying customers at the start
+    type: simple
+    type_params:
+      measure: starting_customers
+  - name: churned_customers
+    label: Churned customers
+    type: simple
+    type_params:
+      measure: churned_customers
+  - name: arr
+    label: ARR (EUR)
+    description: Annual run rate, MRR x 12.
+    type: derived
+    type_params:
+      expr: mrr * 12
+      metrics:
+        - name: mrr
+  - name: net_new_mrr
+    label: Net new MRR
+    description: All customer movements; FX translation is reported separately.
+    type: derived
+    type_params:
+      expr: new_mrr + expansion_mrr + contraction_mrr + churned_mrr + reactivation_mrr
+      metrics:
+        - name: new_mrr
+        - name: expansion_mrr
+        - name: contraction_mrr
+        - name: churned_mrr
+        - name: reactivation_mrr
+  - name: logo_churn_rate
+    label: Logo churn rate
+    description: Paying customers lost this month / paying customers at the start.
+    type: ratio
+    type_params:
+      numerator: churned_customers
+      denominator: starting_customers
+  - name: revenue_churn_rate
+    label: Gross revenue churn rate
+    description: (Churned + contraction MRR) / starting MRR.
+    type: ratio
+    type_params:
+      numerator: lost_mrr
+      denominator: starting_mrr
+  - name: nrr
+    label: Net revenue retention (12 months)
+    description: MRR now of the customers who paid 12 months ago / their MRR then, FX-neutral.
+    type: ratio
+    type_params:
+      numerator: nrr_retained
+      denominator: nrr_base
+  - name: nrr_retained
+    label: MRR now of customers paying 12 months ago
+    type: simple
+    type_params:
+      measure: nrr_retained_eur
+  - name: nrr_base
+    label: MRR 12 months ago
+    type: simple
+    type_params:
+      measure: nrr_base_eur
+  - name: arpa
+    label: ARPA (EUR)
+    description: Average MRR per paying customer.
+    type: ratio
+    type_params:
+      numerator: mrr
+      denominator: active_customers
