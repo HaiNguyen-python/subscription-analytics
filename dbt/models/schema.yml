@@ -1,0 +1,158 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Stripe-style export files loaded as they are by `subs_analytics.warehouse.load_raw`.
+    schema: raw
+    tables:
+      - name: customers
+      - name: prices
+      - name: subscriptions
+        description: Subscription objects with their nested status history.
+      - name: invoices
+      - name: invoice_line_items
+      - name: refunds
+      - name: discounts
+      - name: fx_rates
+        description: Monthly average rate to EUR per currency.
+
+models:
+  - name: stg_customers
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+      - name: currency
+        data_tests:
+          - accepted_values:
+              arguments: {values: [eur, usd]}
+
+  - name: stg_prices
+    columns:
+      - name: price_id
+        data_tests: [unique, not_null]
+      - name: plan_interval
+        data_tests:
+          - accepted_values:
+              arguments: {values: [month, year]}
+      - name: interval_months
+        data_tests: [not_null]
+
+  - name: stg_subscriptions
+    description: One row per subscription status change.
+    columns:
+      - name: subscription_event_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_customers'), field: customer_id}
+      - name: price_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_prices'), field: price_id}
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments: {values: [trialing, active, past_due, canceled]}
+
+  - name: stg_invoices
+    columns:
+      - name: invoice_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_customers'), field: customer_id}
+      - name: invoice_status
+        data_tests:
+          - accepted_values:
+              arguments: {values: [paid, open, uncollectible, void]}
+
+  - name: stg_invoice_line_items
+    columns:
+      - name: line_id
+        data_tests: [unique, not_null]
+      - name: invoice_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('stg_invoices'), field: invoice_id}
+      - name: price_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_prices'), field: price_id}
+
+  - name: stg_refunds
+    columns:
+      - name: refund_id
+        data_tests: [unique, not_null]
+      - name: invoice_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_invoices'), field: invoice_id}
+
+  - name: stg_discounts
+    columns:
+      - name: discount_id
+        data_tests: [unique, not_null]
+      - name: subscription_id
+        description: At most one discount per subscription in this business.
+        data_tests: [unique]
+      - name: duration
+        data_tests:
+          - accepted_values:
+              arguments: {values: [once, repeating, forever]}
+
+  - name: stg_fx_rates
+    columns:
+      - name: rate_to_eur
+        data_tests: [not_null]
+
+  - name: int_customer_months
+    columns:
+      - name: mrr_local
+        data_tests: [not_null]
+
+  - name: fct_mrr_movements
+    description: One row per customer and month with the MRR movement that explains the change.
+    columns:
+      - name: customer_month_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_customer'), field: customer_id}
+      - name: movement_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [new, expansion, contraction, churn, reactivation, flat, inactive]
+
+  - name: dim_customer
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+      - name: lifecycle_status
+        data_tests:
+          - accepted_values:
+              arguments: {values: [active, churned, never_paid]}
+
+  - name: mart_mrr_monthly
+    columns:
+      - name: month_start
+        data_tests: [unique, not_null]
+
+  - name: mart_cohort_retention
+    columns:
+      - name: logo_retention
+        data_tests: [not_null]
+
+  - name: mart_nrr
+    columns:
+      - name: month_start
+        data_tests: [unique]
+
+  - name: mart_revenue_reconciliation
+    columns:
+      - name: month_start
+        data_tests: [unique, not_null]
